@@ -24,11 +24,22 @@ Three capabilities, in build order:
 |---|---|---|
 | MicroPC | SDR capture | Ubuntu 24.04, Airspy Mini, trunk-recorder |
 | `gpu-host` | Transcription | Ubuntu 24.04, RTX Pro 6000 Blackwell 96GB |
-| `db-host` | Postgres + query/dashboard | Colocate with the existing web dashboard (§14) |
+| `db-host` | Postgres + query/dashboard | Dedicated VM, new deployment |
+| NAS | Audio storage | `/vol1/sdr-scanner` NFS export, 68TB available |
 
-`gpu-host` and `db-host` are placeholders throughout this document. Substitute real
-hostnames at deploy time, or resolve them via `/etc/hosts` so the config below works
-unmodified.
+`gpu-host` and `db-host` are placeholders — substitute real hostnames at deploy time,
+or resolve them via `/etc/hosts`.
+
+**NFS mounts required:**
+
+| Host | Mount point | Purpose |
+|---|---|---|
+| MicroPC | `/vol1/sdr-scanner` | trunk-recorder writes audio here |
+| `gpu-host` | `/vol1/sdr-scanner` | Worker reads audio from the same path |
+| `db-host` | `/vol1/sdr-scanner` | Dashboard serves audio files to the browser |
+
+Mounting to the same path on all three hosts means `audio_path` in the database is a
+valid filesystem path everywhere — no translation layer needed.
 
 The MicroPC does capture and nothing else. It must never block on network I/O to
 another host — a stalled hook backs up call handling and drops traffic.
@@ -74,6 +85,7 @@ Per-system block in `config.json`:
   "type": "p25",
   "modulation": "qpsk",
   "talkgroupsFile": "loudoun-talkgroups.csv",
+  "captureDir": "/vol1/sdr-scanner/audio",
   "audioArchive": true,
   "callLog": true,
   "compressWav": true,
@@ -82,12 +94,15 @@ Per-system block in `config.json`:
 }
 ```
 
+- `captureDir` points to the NFS mount. Audio and JSON sidecars land directly on the
+  NAS — no separate copy step, and the path is valid from `gpu-host` and `db-host`
+  without translation.
 - `callLog: true` produces the `.json` sidecar. This is mandatory — it carries the
   metadata the entire downstream system depends on.
 - `audioArchive: true` retains audio after the upload script runs. Without it,
   trunk-recorder deletes the file and the worker finds nothing.
-- `compressWav: true` yields `.m4a` (AAC). Smaller over the wire; faster-whisper
-  decodes it natively via PyAV. No separate WAV handling needed.
+- `compressWav: true` yields `.m4a` (AAC). faster-whisper decodes it natively via
+  PyAV. No separate WAV handling needed.
 
 ### 4.2 Sidecar JSON fields consumed downstream
 
@@ -580,9 +595,9 @@ Python constant once the table is populated.
 | Daily GPU time | 10–50 minutes |
 | Audio storage at ~12 KB/s AAC | ~1 GB/day |
 
-GPU is not the constraint. Disk is. Plan retention: keep audio 30–90 days, keep
-transcripts and metadata indefinitely. A nightly job prunes audio and nulls
-`audio_path` while leaving the row intact.
+GPU is not the constraint. At ~1 GB/day of audio, 68TB on the NAS represents roughly
+180 years of capacity — retain audio indefinitely. Transcripts and metadata on the
+Postgres VM are a small fraction of that volume (5–15 GB/year).
 
 ### 10.2 Monitoring
 
@@ -726,16 +741,84 @@ the notifications.
 
 ---
 
-## 14. Open decisions
+## 14. Decisions log
 
-- **Postgres host.** Colocating with the dashboard is preferred: the query layer is the
-  heaviest reader, and it keeps `gpu-host` dedicated to inference. Requires the
-  MicroPC and GPU host both reach it.
-- **Audio serving.** For a dashboard "play this call" button, audio must be reachable
-  from the browser. Either NFS/SMB-mount the capture directory on the dashboard host,
-  or have the worker copy audio to shared storage during transcription. Decide before
-  building the UI — retrofitting the path scheme is painful.
-- **Retention window.** Driven by how far back you want to reprocess after a prompt or
-  model change. 90 days at ~1 GB/day is 90 GB.
-- **Multi-site expansion.** Schema already carries `system`. No changes needed if a
-  second site or a neighboring county is added later.
+| Decision | Resolution |
+|---|---|
+| Postgres host | New dedicated VM (`db-host`). See §15 for sizing. |
+| Audio storage | NAS NFS export `/vol1/sdr-scanner`, mounted on all three hosts at the same path |
+| Retention | Unlimited — 68TB available on NAS; keep audio indefinitely |
+| Enqueue resilience | Simple direct-to-Postgres hook + nightly reconciliation sweep (§10.3) |
+| Multi-site scope | Single site only |
+
+---
+
+## 15. Postgres VM sizing
+
+**Workload profile:** write-light OLTP (peak ~10 inserts/minute during a busy
+incident), mixed with occasional analytical queries from the dashboard. GIN indexes
+for full-text search are the primary memory consumer. pgvector is a planned phase-3
+addition (HNSW index).
+
+### Recommended spec
+
+| Resource | Minimum | Recommended |
+|---|---|---|
+| vCPUs | 2 | 4 |
+| RAM | 4 GB | 8 GB |
+| OS disk | 32 GB | 32 GB |
+| Data disk | 100 GB | 200 GB (thin-provisioned) |
+
+**RAM rationale.** GIN indexes for FTS are read-heavy and benefit from caching in
+`shared_buffers`. A 4GB VM is workable until pgvector lands — HNSW graphs for even a
+year of transcript embeddings (1536-dim float32, ~2M rows) add several GB of working
+set. 8GB keeps you clear of that boundary.
+
+**vCPU rationale.** 2 vCPUs handles steady-state writes and dashboard queries
+comfortably. 4 vCPUs is the recommended floor because HNSW index builds during
+embedding ingestion (phase 9) saturate a core for minutes at a time.
+
+**Data disk.** The Postgres data volume (transcripts, metadata, FTS indexes) will grow
+roughly 5–15 GB/year at current call volume. A 200GB thin-provisioned disk provides
+many years of headroom. Do **not** put this on NFS — Postgres requires reliable fsync
+semantics and is sensitive to NFS latency; put it on local VM storage. Audio stays on
+the NAS; Postgres only stores the paths and text.
+
+### Key postgresql.conf knobs
+
+Set these at provisioning time:
+
+```ini
+shared_buffers            = 2GB        # ~25% of RAM on an 8GB VM
+effective_cache_size      = 6GB        # ~75% of RAM
+work_mem                  = 64MB       # per-sort; FTS query plans benefit
+maintenance_work_mem      = 512MB      # GIN and HNSW index builds
+checkpoint_completion_target = 0.9
+wal_buffers               = 16MB
+random_page_cost          = 1.1        # SSD/NVMe-backed storage
+```
+
+`work_mem` at 64MB is deliberately conservative — it applies per sort node per
+connection, and analytical queries can fan out. Watch `pg_stat_activity` during
+dashboard queries and tune up if you see spill-to-disk in `EXPLAIN ANALYZE`.
+
+### pgvector addition (phase 9)
+
+When pgvector is enabled, add:
+
+```ini
+max_parallel_workers_per_gather = 2    # HNSW searches parallelize well
+```
+
+HNSW index creation with `m=16, ef_construction=64` on 100k rows takes 2–5 minutes;
+schedule reindexing off-hours.
+
+### Networking
+
+The VM must be reachable from:
+- MicroPC (enqueue hook — low bandwidth, latency-tolerant)
+- `gpu-host` (worker — sustained inserts, moderate bandwidth)
+- Dashboard clients (query — bursty reads)
+
+Place it on the same VLAN as `gpu-host` if your hypervisor supports it. A dedicated
+interface for Postgres traffic is not necessary at this scale.
