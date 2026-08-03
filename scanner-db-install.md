@@ -32,7 +32,7 @@ sudo mkdir -p /vol1/sdr-scanner
 
 # Add to /etc/fstab for persistent mount
 echo "nas:/vol1/sdr-scanner  /vol1/sdr-scanner  nfs  \
-  rsize=131072,wsize=131072,hard,intr,noatime,nfsvers=4  0  0" \
+  rsize=131072,wsize=131072,hard,noatime,nfsvers=4  0  0" \
   | sudo tee -a /etc/fstab
 
 sudo mount -a
@@ -98,21 +98,26 @@ No additional install step required:
 Required for phase-9 semantic search. Install now so the extension is available when
 that phase begins; it will not consume resources until you create a vector column.
 
-```bash
-# Build from source — the apt package lags releases
-sudo apt-get install -y build-essential git
+The PGDG APT repository (added in §2) includes a pgvector package for Postgres 18,
+so no build-from-source step is needed.
 
-git clone --branch v0.8.0 https://github.com/pgvector/pgvector.git
-cd pgvector
-make
-sudo make install
-cd .. && rm -rf pgvector
+```bash
+sudo apt-get install -y postgresql-18-pgvector
 ```
 
 Verify the shared object installed correctly:
 
 ```bash
 ls /usr/lib/postgresql/18/lib/vector.so
+```
+
+**Current version: 0.8.6.** Note that 0.8.2 patched CVE-2026-3172, a buffer overflow
+in parallel HNSW index builds that could leak data or crash the server. The apt
+package will be at or above 0.8.2. After enabling the extension in §6, confirm with:
+
+```sql
+SELECT extversion FROM pg_extension WHERE extname = 'vector';
+-- Expected: 0.8.6 (or higher)
 ```
 
 ---
@@ -126,7 +131,7 @@ recommended 8GB RAM / 4 vCPU VM from the architecture document.
 
 ```ini
 # ── Connections ────────────────────────────────────────────────────
-listen_addresses         = 'localhost,db-host'   # replace db-host with the real IP or hostname
+listen_addresses         = '*'                   # pg_hba.conf controls which hosts can actually connect
 max_connections          = 50                    # worker(1) + dashboard(~10) + admin headroom
 
 # ── Memory ─────────────────────────────────────────────────────────
@@ -230,7 +235,7 @@ SQL
 
 ## 6. Enable extensions
 
-Connect as the `scanner` user and enable extensions inside the database:
+Connect as the postgres superuser — `CREATE EXTENSION` requires superuser privileges:
 
 ```bash
 sudo -u postgres psql -d scanner <<'SQL'
@@ -251,7 +256,7 @@ SELECT extname, extversion FROM pg_extension ORDER BY extname;
 --  pg_trgm   | 1.6
 --  pgcrypto  | 1.3
 --  plpgsql   | 1.0
---  vector    | 0.8.0
+--  vector    | 0.8.6
 ```
 
 ---
@@ -306,7 +311,7 @@ CREATE TABLE calls (
   segments        jsonb,          -- per-segment logprob, no_speech_prob, timings
   avg_logprob     real,
   model           text,
-  prompt_version  int,            -- increment when DOMAIN_PROMPT changes
+  prompt_version  int,            -- FK to prompt_versions.id added below after that table is created
   transcribed_at  timestamptz,
   suspect         boolean DEFAULT false,
   alerted         boolean DEFAULT false,
@@ -348,6 +353,11 @@ CREATE TABLE talkgroups (
 );
 
 COMMENT ON COLUMN talkgroups.is_data IS 'True = exclude from transcription (data/telemetry talkgroups)';
+
+-- prompt_versions must exist before this FK can be added
+ALTER TABLE calls
+  ADD CONSTRAINT calls_prompt_version_fkey
+  FOREIGN KEY (prompt_version) REFERENCES prompt_versions (id);
 
 -- Unit IDs learned from unitTagsFile and audio content over time
 CREATE TABLE units (
@@ -518,8 +528,8 @@ not lock the table.
 Minimum viable backup: `pg_dump` nightly to the NAS.
 
 ```bash
-# /opt/scanner/backup-db.sh — run via cron as postgres user
 #!/usr/bin/env bash
+# /opt/scanner/backup-db.sh — run via cron as postgres user
 set -euo pipefail
 DEST="/vol1/sdr-scanner/backups/postgres"
 mkdir -p "$DEST"
