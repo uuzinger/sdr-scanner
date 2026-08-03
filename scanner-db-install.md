@@ -2,7 +2,7 @@
 
 **Host:** `db-host` (dedicated VM)
 **OS:** Ubuntu 24.04 LTS
-**Postgres version:** 17 (current stable)
+**Postgres version:** 18 (current stable, 18.4 as of May 2026)
 **Extensions:** `pg_trgm`, `btree_gin`, `pgcrypto`, `pgvector`
 
 ---
@@ -45,9 +45,9 @@ Tune `rsize`/`wsize` down to `65536` if your NAS does not support 128K I/O.
 
 ---
 
-## 2. Install PostgreSQL 17
+## 2. Install PostgreSQL 18
 
-Ubuntu 24.04 ships Postgres 16. Use the official PGDG repository for 17.
+Ubuntu 24.04 ships Postgres 16. Use the official PGDG repository for 18.
 
 ```bash
 # Add the PGDG signing key and repository
@@ -60,15 +60,25 @@ sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresq
   > /etc/apt/sources.list.d/pgdg.list'
 
 sudo apt-get update
-sudo apt-get install -y postgresql-17 postgresql-client-17 postgresql-server-dev-17
+sudo apt-get install -y postgresql-18 postgresql-client-18 postgresql-server-dev-18
 
 # Verify
 psql --version
-# postgresql 17.x
+# postgresql 18.x
 ```
 
-The installer creates the `postgres` system user and starts the `postgresql@17-main`
-service automatically. Data directory is `/var/lib/postgresql/17/main`.
+The installer creates the `postgres` system user and starts the `postgresql@18-main`
+service automatically. Data directory is `/var/lib/postgresql/18/main`.
+
+**Postgres 18 notable changes relevant to this deployment:**
+
+- **Asynchronous I/O (AIO)** — sequential scans and bitmap heap scans (both common
+  in FTS queries) are significantly faster. No configuration change needed; it is
+  enabled by default.
+- **Data checksums on by default** — `initdb` now enables checksums automatically.
+  This is desirable; leave it as-is. It means any future `pg_upgrade` from this
+  cluster requires the destination cluster to also have checksums enabled.
+- **`uuidv7()`** — native UUID v7 generation available if needed for future tables.
 
 ---
 
@@ -102,7 +112,7 @@ cd .. && rm -rf pgvector
 Verify the shared object installed correctly:
 
 ```bash
-ls /usr/lib/postgresql/17/lib/vector.so
+ls /usr/lib/postgresql/18/lib/vector.so
 ```
 
 ---
@@ -111,7 +121,7 @@ ls /usr/lib/postgresql/17/lib/vector.so
 
 ### 4.1 postgresql.conf
 
-Edit `/etc/postgresql/17/main/postgresql.conf`. The values below assume the
+Edit `/etc/postgresql/18/main/postgresql.conf`. The values below assume the
 recommended 8GB RAM / 4 vCPU VM from the architecture document.
 
 ```ini
@@ -156,14 +166,14 @@ in query plans.
 Reload after edits (no restart needed for most parameters):
 
 ```bash
-sudo systemctl reload postgresql@17-main
+sudo systemctl reload postgresql@18-main
 # For parameters requiring restart (e.g. shared_buffers, huge_pages):
-sudo systemctl restart postgresql@17-main
+sudo systemctl restart postgresql@18-main
 ```
 
 ### 4.2 pg_hba.conf
 
-Edit `/etc/postgresql/17/main/pg_hba.conf`. Add entries for the hosts that connect:
+Edit `/etc/postgresql/18/main/pg_hba.conf`. Add entries for the hosts that connect:
 
 ```
 # TYPE  DATABASE  USER     ADDRESS              METHOD
@@ -187,7 +197,7 @@ Replace `<MicroPC-IP>`, `<gpu-host-IP>`, `<db-host-IP>`, and `<admin-IP>` with r
 addresses. Reload after changes:
 
 ```bash
-sudo systemctl reload postgresql@17-main
+sudo systemctl reload postgresql@18-main
 ```
 
 ---
