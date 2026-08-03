@@ -67,13 +67,11 @@ Bash
 sudo nano /etc/X11/Xwrapper.config
 Set the following line:
 
-Ini, TOML
 allowed_users=anybody
 2. Trunk Recorder Backend Service
 Ensure your SDR software starts automatically.
 sudo nano /etc/systemd/system/trunk-recorder.service
 
-Ini, TOML
 [Unit]
 Description=Trunk Recorder SDR Service
 After=network.target
@@ -91,7 +89,6 @@ WantedBy=multi-user.target
 Run the dashboard seamlessly over the login prompt on the physical display.
 sudo nano /etc/systemd/system/sdr-ui.service
 
-Ini, TOML
 [Unit]
 Description=SDR Pygame Dashboard
 After=systemd-user-sessions.service systemd-logind.service trunk-recorder.service
