@@ -23,8 +23,12 @@ Three capabilities, in build order:
 | Host | Role | Notes |
 |---|---|---|
 | MicroPC | SDR capture | Ubuntu 24.04, Airspy Mini, trunk-recorder |
-| `gpu.zinger.org` | Transcription | Ubuntu 24.04, RTX Pro 6000 Blackwell 96GB |
-| TBD | Postgres + query/dashboard | Colocate with the existing web dashboard |
+| `gpu-host` | Transcription | Ubuntu 24.04, RTX Pro 6000 Blackwell 96GB |
+| `db-host` | Postgres + query/dashboard | Colocate with the existing web dashboard (§14) |
+
+`gpu-host` and `db-host` are placeholders throughout this document. Substitute real
+hostnames at deploy time, or resolve them via `/etc/hosts` so the config below works
+unmodified.
 
 The MicroPC does capture and nothing else. It must never block on network I/O to
 another host — a stalled hook backs up call handling and drops traffic.
@@ -43,10 +47,10 @@ trunk-recorder (MicroPC)
 Postgres  jobs  table                        ← durable queue, SKIP LOCKED
         │
         ▼
-Transcription worker (gpu.zinger.org)
+Transcription worker (gpu-host)
         │  pre-filters, fetches audio, POSTs to local Whisper
         ▼
-Whisper HTTP service :10301 (gpu.zinger.org) ← dedicated instance, NOT the HA one
+Whisper HTTP service :10301 (gpu-host)       ← dedicated instance, NOT the HA one
         │
         ▼
 Postgres  calls  table  (+ GIN index on tsvector)
@@ -128,7 +132,7 @@ JSON="$1"
 AUDIO="${JSON%.json}.m4a"
 
 PGPASSWORD="$SCANNER_DB_PASS" psql \
-  -h db.zinger.org -U scanner -d scanner \
+  -h db-host -U scanner -d scanner \
   -v ON_ERROR_STOP=0 -q -c \
   "INSERT INTO jobs (json_path, audio_path)
    VALUES ('${JSON}', '${AUDIO}')
@@ -199,7 +203,7 @@ crash. Jobs exceeding 5 attempts move to `failed` and are left for manual inspec
 
 ## 7. Stage 4 — Transcription worker
 
-Runs on `gpu.zinger.org`. Single process is sufficient; a burst of 30 calls clears in
+Runs on `gpu-host`. Single process is sufficient; a burst of 30 calls clears in
 well under a minute.
 
 ### 7.1 Pre-filter (before any GPU work)
@@ -221,7 +225,7 @@ reduces hallucination volume.
 
 ```python
 #!/usr/bin/env python3
-"""Scanner transcription worker. Runs on gpu.zinger.org."""
+"""Scanner transcription worker. Runs on gpu-host."""
 
 import hashlib, json, os, time, pathlib
 import httpx, psycopg
@@ -473,7 +477,7 @@ Description=Scanner Whisper transcription service
 After=network-online.target
 
 [Service]
-User=zinger
+User=scanner
 WorkingDirectory=/opt/scanner
 ExecStart=/opt/scanner/venv/bin/uvicorn whisper_service:app \
           --host 127.0.0.1 --port 10301 --workers 1
@@ -725,7 +729,7 @@ the notifications.
 ## 14. Open decisions
 
 - **Postgres host.** Colocating with the dashboard is preferred: the query layer is the
-  heaviest reader, and it keeps `gpu.zinger.org` dedicated to inference. Requires the
+  heaviest reader, and it keeps `gpu-host` dedicated to inference. Requires the
   MicroPC and GPU host both reach it.
 - **Audio serving.** For a dashboard "play this call" button, audio must be reachable
   from the browser. Either NFS/SMB-mount the capture directory on the dashboard host,
