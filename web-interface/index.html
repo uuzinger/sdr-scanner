@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block nav_browse %}on{% endblock %}
+
+{% block body %}
+<main class="shell">
+  <aside class="rail">
+    <form id="filters"
+          hx-get="/partials/calls"
+          hx-target="#calls"
+          hx-trigger="change, keyup changed delay:400ms from:input[name=q]"
+          hx-indicator="#working">
+      <label class="field">
+        <span>Search transcripts</span>
+        <input type="search" name="q" autocomplete="off"
+               placeholder="&quot;structure fire&quot; -drill">
+      </label>
+      <p class="hint">Quote a phrase to match it exactly. Prefix a word with
+        <code>-</code> to exclude it.</p>
+
+      <label class="field">
+        <span>Talkgroup</span>
+        <select name="tg">
+          <option value="">All talkgroups</option>
+          {% for t in talkgroups %}
+          <option value="{{ t.talkgroup }}" {% if preset_tg == t.talkgroup|string %}selected{% endif %}>
+            {{ t.label }} · {{ t.n }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Service</span>
+        <select name="kind">
+          <option value="">Everything</option>
+          <option value="fire">Fire &amp; EMS</option>
+          <option value="law">Law enforcement</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Window</span>
+        <select name="hours">
+          <option value="">All time</option>
+          <option value="1">Last hour</option>
+          <option value="6">Last 6 hours</option>
+          <option value="24" selected>Last 24 hours</option>
+          <option value="168">Last 7 days</option>
+          <option value="720">Last 30 days</option>
+        </select>
+      </label>
+    </form>
+
+    <section class="live-rail"
+             hx-get="/partials/live"
+             hx-trigger="load, every 5s"
+             hx-swap="innerHTML">
+      <p class="placeholder">Opening the feed…</p>
+    </section>
+  </aside>
+
+  <section class="results">
+    <div class="results-head">
+      <h2>Call log</h2>
+      <span id="working" class="htmx-indicator">reading…</span>
+    </div>
+    <div id="calls"
+         hx-get="/partials/calls?hours=24{% if preset_tg %}&tg={{ preset_tg }}{% endif %}"
+         hx-trigger="load">
+      <p class="placeholder">Pulling the last 24 hours…</p>
+    </div>
+  </section>
+</main>
+{% endblock %}

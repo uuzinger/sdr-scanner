@@ -1,0 +1,50 @@
+{% if not calls %}
+  {% if first_page %}
+  <div class="empty">
+    <p><strong>No calls match that.</strong></p>
+    <p>Widen the window or clear the talkgroup. Remember the log only shows calls
+       the worker has already transcribed — check the queue in the rail if you
+       expected something newer.</p>
+  </div>
+  {% endif %}
+{% else %}
+  {% set ns = namespace(day='') %}
+  {% for c in calls %}
+    {% if c.ts_day and c.ts_day != ns.day %}
+      {% set ns.day = c.ts_day %}
+      <h3 class="daybreak"><span>{{ c.ts_day }}</span></h3>
+    {% endif %}
+    <article class="call kind-{{ c.kind }} conf-{{ c.conf_band }}"
+             data-audio="/audio/{{ c.id }}"
+             data-label="{{ c.label }} · {{ c.ts_short }}"
+             tabindex="0" role="button"
+             aria-label="Play {{ c.label }} at {{ c.ts_short }}">
+      <div class="call-meta">
+        <time datetime="{{ c.ts_iso }}">{{ c.ts_short or '—' }}</time>
+        <span class="tgname">{{ c.label }}</span>
+        <span class="tgid">{{ c.talkgroup or '' }}</span>
+      </div>
+
+      <div class="bar" title="{{ '%.1f'|format(c.duration_f) if c.duration_f else 'unknown' }} seconds">
+        <div class="bar-fill" style="width: {{ c.bar_pct }}%"></div>
+        <span class="bar-len">{{ '%.0fs'|format(c.duration_f) if c.duration_f else '' }}</span>
+      </div>
+
+      <p class="say">
+        {{- c.text|highlight -}}
+        {%- if c.conf_band == 'low' %} <span class="flag" title="Whisper was unsure — treat this text as a guess">low confidence</span>{% endif -%}
+      </p>
+    </article>
+  {% endfor %}
+
+  {% if calls|length == limit and next_ts %}
+  <div class="more">
+    <button type="button"
+            hx-get="/partials/calls?before_ts={{ next_ts|urlencode }}&before_id={{ next_id }}&q={{ q|urlencode }}&tg={{ tg|urlencode }}&kind={{ kind|urlencode }}&hours={{ hours }}"
+            hx-target="closest .more"
+            hx-swap="outerHTML">
+      Load {{ limit }} older calls
+    </button>
+  </div>
+  {% endif %}
+{% endif %}

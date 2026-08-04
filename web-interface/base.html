@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Loudoun Scanner{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body>
+<header class="masthead">
+  <div class="mark">
+    <span class="mark-sys">WACN BEE00 · SYS 373 · SITE 001</span>
+    <h1>Loudoun&nbsp;Air&nbsp;Traffic</h1>
+  </div>
+  <nav>
+    <a href="/" class="{% block nav_browse %}{% endblock %}">Calls</a>
+    <a href="/stats" class="{% block nav_stats %}{% endblock %}">Activity</a>
+  </nav>
+</header>
+
+{% block body %}{% endblock %}
+
+<audio id="player" preload="none"></audio>
+<div id="nowplaying" class="nowplaying" hidden>
+  <span class="np-tg"></span>
+  <span class="np-time"></span>
+  <button type="button" class="np-stop" aria-label="Stop playback">stop</button>
+</div>
+
+<script>
+(function () {
+  const player = document.getElementById('player');
+  const bar = document.getElementById('nowplaying');
+  let current = null;
+
+  function clear() {
+    document.querySelectorAll('.call.playing').forEach(el => el.classList.remove('playing'));
+  }
+
+  document.addEventListener('click', function (e) {
+    const stop = e.target.closest('.np-stop');
+    if (stop) { player.pause(); bar.hidden = true; clear(); return; }
+
+    const row = e.target.closest('[data-audio]');
+    if (!row) return;
+    if (e.target.closest('a')) return;
+
+    const src = row.dataset.audio;
+    if (current === src && !player.paused) { player.pause(); clear(); return; }
+    clear();
+    current = src;
+    player.src = src;
+    player.play().then(() => {
+      row.classList.add('playing');
+      bar.hidden = false;
+      bar.querySelector('.np-tg').textContent = row.dataset.label || '';
+    }).catch(() => {
+      row.classList.add('missing');
+      bar.hidden = true;
+    });
+  });
+
+  player.addEventListener('timeupdate', function () {
+    const el = bar.querySelector('.np-time');
+    const d = isFinite(player.duration) ? player.duration : 0;
+    el.textContent = fmt(player.currentTime) + (d ? ' / ' + fmt(d) : '');
+    const row = document.querySelector('.call.playing .bar-fill');
+    if (row && d) row.style.setProperty('--played', (player.currentTime / d * 100) + '%');
+  });
+  player.addEventListener('ended', function () { clear(); bar.hidden = true; });
+
+  function fmt(s) {
+    s = Math.floor(s || 0);
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+})();
+</script>
+</body>
+</html>

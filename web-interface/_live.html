@@ -1,0 +1,42 @@
+{% set gap = status.get('seconds_since') %}
+<div class="livehead">
+  <span class="dot {% if gap is none %}unknown{% elif gap < 300 %}hot{% elif gap < 1800 %}warm{% else %}cold{% endif %}"></span>
+  <span class="livelabel">
+    {%- if gap is none -%}no transcripts yet
+    {%- elif gap < 90 -%}on the air
+    {%- elif gap < 5400 -%}quiet {{ (gap // 60) }}m
+    {%- else -%}quiet {{ (gap // 3600) }}h
+    {%- endif -%}
+  </span>
+</div>
+
+<dl class="counters">
+  <div><dt>24h</dt><dd>{{ '{:,}'.format(status.get('calls_24h') or 0) }}</dd></div>
+  <div><dt>Captured</dt><dd>{{ '{:,}'.format(status.get('total_calls') or 0) }}</dd></div>
+  <div><dt>Transcribed</dt><dd>{{ '{:,}'.format(status.get('total_transcripts') or 0) }}</dd></div>
+</dl>
+
+{% if status.get('states') %}
+<ul class="queue">
+  {% for s in status.get('states') %}
+  <li class="st-{{ s.state }}"><span>{{ s.state }}</span><em>{{ '{:,}'.format(s.n) }}</em></li>
+  {% endfor %}
+</ul>
+{% if status.get('failed') %}
+<p class="warn">{{ status.get('failed') }} job{{ 's' if status.get('failed') != 1 }} failed — check
+  <code>last_error</code> in the jobs table.</p>
+{% endif %}
+{% endif %}
+
+<h4 class="railhead">Newest on the air</h4>
+<ol class="ticker">
+  {% for c in calls %}
+  <li class="kind-{{ c.kind }}" data-audio="/audio/{{ c.id }}" data-label="{{ c.label }}">
+    <span class="t">{{ c.ts_short }}</span>
+    <span class="a">{{ c.label }}</span>
+    <span class="x">{{ c.text[:70] }}</span>
+  </li>
+  {% else %}
+  <li class="placeholder">Nothing transcribed yet.</li>
+  {% endfor %}
+</ol>

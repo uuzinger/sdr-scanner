@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block nav_stats %}on{% endblock %}
+{% block title %}Activity — Loudoun Scanner{% endblock %}
+
+{% block body %}
+<main class="shell stats">
+  <section class="results">
+    <div class="results-head">
+      <h2>Activity, last {{ hours }} hours</h2>
+      <nav class="windowpick">
+        <a href="/stats?hours=6" class="{{ 'on' if hours == 6 }}">6h</a>
+        <a href="/stats?hours=24" class="{{ 'on' if hours == 24 }}">24h</a>
+        <a href="/stats?hours=168" class="{{ 'on' if hours == 168 }}">7d</a>
+      </nav>
+    </div>
+
+    <div class="histogram">
+      {% for b in by_hour %}
+      <div class="hbar" title="{{ b.bucket.strftime('%a %H:%M') }} — {{ b.n }} calls">
+        <div class="hbar-fill" style="height: {{ (b.n / peak * 100)|round|int }}%"></div>
+      </div>
+      {% else %}
+      <p class="placeholder">No calls in this window.</p>
+      {% endfor %}
+    </div>
+    <p class="axis"><span>{{ hours }}h ago</span><span>peak {{ peak }} calls/hr</span><span>now</span></p>
+
+    <h3 class="section">Busiest talkgroups</h3>
+    <table class="tgtable">
+      <thead><tr><th>Talkgroup</th><th class="num">Calls</th><th class="num">Airtime</th><th></th></tr></thead>
+      <tbody>
+      {% for r in by_tg %}
+        <tr class="kind-{{ r.kind }}">
+          <td>
+            <a href="/?tg={{ r.talkgroup }}">{{ r.label }}</a>
+            <span class="tgid">{{ r.talkgroup }}</span>
+          </td>
+          <td class="num">{{ '{:,}'.format(r.n) }}</td>
+          <td class="num">{{ (r.airtime / 60)|round(1) }}m</td>
+          <td class="spark"><div style="width: {{ (r.n / top * 100)|round|int }}%"></div></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="placeholder">Nothing to rank yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</main>
+{% endblock %}
