@@ -189,17 +189,21 @@ local   all       postgres                      peer
 host    scanner   scanner  <MicroPC-IP>/32       scram-sha-256
 host    scanner   scanner  <gpu-host-IP>/32      scram-sha-256
 host    scanner   scanner  127.0.0.1/32          scram-sha-256
+host    scanner   scanner  ::1/128               scram-sha-256
 
 # Dashboard read-only user
 host    scanner   scanner_ro  <db-host-IP>/32    scram-sha-256
 host    scanner   scanner_ro  127.0.0.1/32       scram-sha-256
+host    scanner   scanner_ro  ::1/128            scram-sha-256
 
 # Admin access from your management workstation
 host    all       postgres  <admin-IP>/32         scram-sha-256
 ```
 
 Replace `<MicroPC-IP>`, `<gpu-host-IP>`, `<db-host-IP>`, and `<admin-IP>` with real
-addresses. Reload after changes:
+addresses. Both IPv4 (`127.0.0.1`) and IPv6 (`::1`) loopback entries are required —
+`localhost` resolves to `::1` on most modern Linux systems and will fail with only the
+IPv4 entry present.
 
 ```bash
 sudo systemctl reload postgresql@18-main
