@@ -1,25 +1,28 @@
 #!/usr/bin/env bash
-# Invoked by trunk-recorder on call completion.
-# $1 = absolute path to the call's .json sidecar
 set -uo pipefail
 
-JSON="$1"
-BASE="${JSON%.json}"
+WAV="$1"
+JSON="$2"
+M4A="${3:-}"
 LOG=/var/log/scanner/enqueue.err
 
+esc() { printf '%s' "$1" | sed "s/'/''/g"; }
+
 {
-  if   [[ -f "${BASE}.m4a" ]]; then AUDIO="${BASE}.m4a"
-  elif [[ -f "${BASE}.wav" ]]; then AUDIO="${BASE}.wav"
+  if   [[ -n "$M4A" && -f "$M4A" ]]; then AUDIO="$M4A"
+  elif [[ -f "$WAV" ]];              then AUDIO="$WAV"
   else
     echo "$(date -Is) no audio for ${JSON}" >>"$LOG"
     exit 0
   fi
 
+  J=$(esc "$JSON")
+  A=$(esc "$AUDIO")
+
   timeout 15 psql -w -h db-host -U scanner -d scanner \
     -v ON_ERROR_STOP=1 -q \
-    -v json="$JSON" -v audio="$AUDIO" \
     -c "INSERT INTO jobs (json_path, audio_path)
-        VALUES (:'json', :'audio')
+        VALUES ('$J', '$A')
         ON CONFLICT (json_path) DO NOTHING;" \
     >/dev/null 2>>"$LOG" \
     || echo "$(date -Is) enqueue failed: ${JSON}" >>"$LOG"
