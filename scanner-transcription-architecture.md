@@ -144,15 +144,26 @@ The hook has exactly one job: write a row and exit. No HTTP, no ffmpeg, no retri
 set -uo pipefail
 
 JSON="$1"
-AUDIO="${JSON%.json}.m4a"
+BASE="${JSON%.json}"
+LOG=/var/log/scanner/enqueue.err
 
-PGPASSWORD="$SCANNER_DB_PASS" psql \
-  -h db-host -U scanner -d scanner \
-  -v ON_ERROR_STOP=0 -q -c \
-  "INSERT INTO jobs (json_path, audio_path)
-   VALUES ('${JSON}', '${AUDIO}')
-   ON CONFLICT (json_path) DO NOTHING;" \
-  >/dev/null 2>>/var/log/scanner/enqueue.err &
+{
+  if   [[ -f "${BASE}.m4a" ]]; then AUDIO="${BASE}.m4a"
+  elif [[ -f "${BASE}.wav" ]]; then AUDIO="${BASE}.wav"
+  else
+    echo "$(date -Is) no audio for ${JSON}" >>"$LOG"
+    exit 0
+  fi
+
+  timeout 15 psql -w -h db-host -U scanner -d scanner \
+    -v ON_ERROR_STOP=1 -q \
+    -v json="$JSON" -v audio="$AUDIO" \
+    -c "INSERT INTO jobs (json_path, audio_path)
+        VALUES (:'json', :'audio')
+        ON CONFLICT (json_path) DO NOTHING;" \
+    >/dev/null 2>>"$LOG" \
+    || echo "$(date -Is) enqueue failed: ${JSON}" >>"$LOG"
+} &
 
 exit 0
 ```
